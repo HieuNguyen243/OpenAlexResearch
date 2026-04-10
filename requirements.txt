@@ -1,0 +1,16 @@
+torch
+torch-geometric
+pandas
+scikit-learn
+numpy
+streamlit
+pyodbc
+requests
+sentence-transformers
+
+# Optional but recommended for full PyG support/performance
+pyg-lib
+torch-scatter
+torch-sparse
+torch-cluster
+torch-spline-conv

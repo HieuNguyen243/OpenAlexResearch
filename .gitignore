@@ -1,0 +1,48 @@
+# -----------------------------
+# Python cache and bytecode
+# -----------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# -----------------------------
+# Virtual environments
+# -----------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# -----------------------------
+# Tool/test caches
+# -----------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# -----------------------------
+# Local env and logs
+# -----------------------------
+.env
+.env.*
+*.log
+
+# -----------------------------
+# IDE/editor and OS files
+# -----------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# Generated project artifacts
+# -----------------------------
+data/*.pt
+data/*.csv
+data/*.bak
