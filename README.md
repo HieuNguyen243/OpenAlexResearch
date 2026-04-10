@@ -1,6 +1,10 @@
-# Hệ thống gợi ý bài báo từ dữ liệu OpenAlex (SQL Server)
+# CẤU TRÚC DỰ ÁN
 
-Dự án này sử dụng dữ liệu đã có sẵn trong SQL Server để xây dựng hệ gợi ý bài báo khoa học theo đồ thị trích dẫn.
+File: config.py: Kết nối đến sql server để lấy dữ liệu
+
+    data_loader.py: Lấy dữ liệu từ sql, loại bỏ những bản ghi thiếu title hoặc thiếu năm, chuẩn hóa ciation về số nguyên và trả về file metadata.csv
+
+    preprrocessing.py: là node_feaures.pt (lưu trữ vector embedding từ tiêu đề) và edge_index.pt (mỗi cột là một cạnh có hướng source -> target giữa 2 bài báo.)
 
 ## Mục tiêu
 
