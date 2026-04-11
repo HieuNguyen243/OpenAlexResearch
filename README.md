@@ -6,6 +6,21 @@ File: config.py: Kết nối đến sql server để lấy dữ liệu
 
     preprrocessing.py: là node_feaures.pt (lưu trữ vector embedding từ tiêu đề) và edge_index.pt (mỗi cột là một cạnh có hướng source -> target giữa 2 bài báo.)
 
+# CẤU TRÚC DỰ ÁN
+
+Thư mục `src/` gồm các file chính:
+
+- **config.py**: Cấu hình kết nối SQL Server, xác định thư mục dữ liệu.
+- **data_loader.py**: Lấy dữ liệu từ SQL, loại bỏ bản ghi thiếu `title` hoặc `năm`, chuẩn hóa `citations` về số nguyên, xuất file `metadata.csv`.
+- **preprocessing.py**: Tiền xử lý, tạo vector embedding từ tiêu đề (`node_features.pt`), tạo ma trận cạnh trích dẫn (`edge_index.pt`), xuất `metadata.csv`.
+- **model_gat.py**: Định nghĩa và huấn luyện mô hình GATv2, sinh embedding chuẩn hóa (`smart_embeddings.pt`), lưu checkpoint mô hình (`gat_autoencoder.pt`).
+- **ranking.py**: Tính ma trận cosine similarity, xếp hạng bài báo theo năm và độ tương đồng embedding, cung cấp hàm gợi ý bài liên quan.
+- **app.py**: Giao diện Streamlit, hiển thị kết quả, cho phép tìm kiếm và xem gợi ý bài báo.
+
+Thư mục `data/` chứa các file dữ liệu trung gian:
+
+- `node_features.pt`, `edge_index.pt`, `metadata.csv`, `smart_embeddings.pt`, `gat_autoencoder.pt`, ...
+
 ## Mục tiêu
 
 Pipeline gồm 5 giai đoạn:
@@ -77,15 +92,22 @@ python src/preprocessing.py
 ### Bước 3: Huấn luyện GAT và sinh embedding
 
 ```bash
-
+python src/model_gat.py
 ```
 
 Đầu ra:
 
 - `data/smart_embeddings.pt`
 - `data/gat_autoencoder.pt`
+- Đọc dữ liệu đã tiền xử lý (`node_features.pt`, `edge_index.pt`).
+- Huấn luyện mô hình GATv2 tự động (GATAutoEncoder).
+- Xuất embedding đã chuẩn hóa L2 ra file `data/smart_embeddings.pt`.
+- Lưu checkpoint mô hình vào `data/gat_autoencoder.pt`.
 
 ### Bước 4: (Tùy chọn) kiểm tra ranking bằng script
+
+- `data/smart_embeddings.pt`: embedding vector cho từng bài báo.
+- `data/gat_autoencoder.pt`: trọng số mô hình đã huấn luyện.
 
 ```bash
 python - <<'PY'

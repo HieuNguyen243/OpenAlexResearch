@@ -1,18 +1,21 @@
+
+# Module tính toán similarity và xếp hạng bài báo dựa trên embedding, năm xuất bản
 import torch
 import os
 import pandas as pd
 import sys
 
+# Đảm bảo import đúng đường dẫn config
 try:
     from src.config import DATA_DIR
 except ModuleNotFoundError:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from src.config import DATA_DIR
 
-
+# Đường dẫn lưu ma trận similarity
 SIMILARITY_PATH = os.path.join(DATA_DIR, "similarity_matrix.pt")
 
-
+# Load embedding và metadata từ file, kiểm tra tồn tại
 def _load_embeddings_and_metadata():
     embeddings_path = os.path.join(DATA_DIR, "smart_embeddings.pt")
     metadata_path = os.path.join(DATA_DIR, "metadata.csv")
@@ -27,17 +30,17 @@ def _load_embeddings_and_metadata():
     metadata = pd.read_csv(metadata_path)
     return embeddings, metadata
 
-
+# Tính toán hoặc load lại ma trận cosine similarity giữa các bài báo
 def build_similarity_index(force_recompute=False):
     if os.path.exists(SIMILARITY_PATH) and not force_recompute:
         return torch.load(SIMILARITY_PATH)
 
     embeddings, _ = _load_embeddings_and_metadata()
-    similarity_matrix = embeddings @ embeddings.T
+    similarity_matrix = embeddings @ embeddings.T  # Nhân ma trận để lấy cosine similarity
     torch.save(similarity_matrix, SIMILARITY_PATH)
     return similarity_matrix
 
-
+# Lấy danh sách bài báo liên quan nhất cho một PaperIndex
 def get_recommendations(target_paper_idx, top_n=5):
     similarity_matrix = build_similarity_index(force_recompute=False)
     _, metadata = _load_embeddings_and_metadata()
@@ -45,6 +48,7 @@ def get_recommendations(target_paper_idx, top_n=5):
     if "PaperIndex" not in metadata.columns:
         raise ValueError("metadata.csv must include PaperIndex column.")
 
+    # Map PaperIndex sang chỉ số dòng
     paper_to_row = {int(v): i for i, v in enumerate(metadata["PaperIndex"].tolist())}
     target_row = paper_to_row.get(int(target_paper_idx))
     if target_row is None:
@@ -56,7 +60,7 @@ def get_recommendations(target_paper_idx, top_n=5):
     candidates["Score"] = similarities
     candidates = candidates[candidates["PaperIndex"] != int(target_paper_idx)]
 
-    # Ranking logic: group by Year (newer first), then cosine score desc.
+    # Xếp hạng: ưu tiên năm mới hơn, sau đó điểm cosine giảm dần
     sort_columns = [c for c in ["Year", "Score"] if c in candidates.columns]
     if sort_columns == ["Year", "Score"]:
         candidates = candidates.sort_values(by=["Year", "Score"], ascending=[False, False])

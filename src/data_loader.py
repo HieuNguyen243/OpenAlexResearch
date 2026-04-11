@@ -1,24 +1,27 @@
+"""
+Script lấy dữ liệu từ SQL Server, làm sạch, chuẩn hóa và xuất metadata cho pipeline.
+"""
 import argparse
 import os
 import sys
-
 import pandas as pd
 import pyodbc
 
+# Đảm bảo import đúng config và đường dẫn dữ liệu
 try:
     from src.config import DATA_DIR, get_conn_str
 except ModuleNotFoundError:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from src.config import DATA_DIR, get_conn_str
 
-
+# Các cột bắt buộc phải có trong metadata
 REQUIRED_COLUMNS = ["PaperIndex", "OpenAlexID", "Title", "Authors", "Year", "Citations", "URL"]
 
-
+# Kết nối tới SQL Server
 def _connect() -> pyodbc.Connection:
     return pyodbc.connect(get_conn_str())
 
-
+# Lấy dữ liệu bài báo từ SQL, cho phép giới hạn số lượng (limit)
 def load_papers_from_sql(limit: int | None = None) -> pd.DataFrame:
     top_clause = f"TOP ({limit})" if limit is not None else ""
     query = f"""
@@ -50,7 +53,7 @@ def load_papers_from_sql(limit: int | None = None) -> pd.DataFrame:
 
     return df
 
-
+# Làm sạch dữ liệu: loại bỏ bản ghi thiếu title/năm, chuẩn hóa citations về số nguyên
 def clean_papers(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
@@ -61,12 +64,11 @@ def clean_papers(df: pd.DataFrame) -> pd.DataFrame:
     cleaned["Citations"] = cleaned["Citations"].fillna(0).astype(int)
     return cleaned
 
-
+# Kiểm tra schema dataframe có đủ các cột cần thiết không
 def validate_schema(df: pd.DataFrame) -> None:
     missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
     if missing:
         raise RuntimeError(f"Missing required columns in dbo.Papers: {missing}")
-
 
 def run_sql_loader(limit: int | None = None, export_csv: bool = False) -> pd.DataFrame:
     print("Loading papers from SQL Server dbo.Papers...")
@@ -86,13 +88,11 @@ def run_sql_loader(limit: int | None = None, export_csv: bool = False) -> pd.Dat
 
     return cleaned_df
 
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Load and validate papers from SQL Server only.")
     parser.add_argument("--limit", type=int, default=None, help="Optional row limit for quick checks.")
     parser.add_argument("--export-csv", action="store_true", help="Export cleaned SQL snapshot to data/sql_papers_snapshot.csv.")
     return parser
-
 
 if __name__ == "__main__":
     args = _build_parser().parse_args()
