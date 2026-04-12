@@ -57,13 +57,12 @@ def get_recommendations(target_paper_idx, top_n=5):
     candidates = candidates[candidates["PaperIndex"] != int(target_paper_idx)]
 
     # Ranking logic: group by Year (newer first), then cosine score desc.
-    sort_columns = [c for c in ["Year", "Score"] if c in candidates.columns]
-    if sort_columns == ["Year", "Score"]:
-        candidates = candidates.sort_values(by=["Year", "Score"], ascending=[False, False])
-    else:
-        candidates = candidates.sort_values(by=["Score"], ascending=[False])
-
+    candidates = candidates.sort_values(by=["Score"], ascending=[False])
+    
     top_df = candidates.head(top_n)
+
+    if "Year" in top_df.columns:
+        top_df = top_df.sort_values(by=["Year", "Score"], ascending=[False, False])
     results = []
     for _, row in top_df.iterrows():
         results.append(

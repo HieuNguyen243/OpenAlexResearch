@@ -9,7 +9,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 SQL_CONFIG = {
     'driver': '{SQL Server}',
-    'server': r'LAPTOP-TEU72OKK\SQLEXPRESS',
+    'server': r'NGOCANH\SQLEXPRESS01',
     'database': 'OpenAlexDB',
     'trusted_connection': 'yes'
 }
