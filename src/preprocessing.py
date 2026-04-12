@@ -15,40 +15,12 @@ except ModuleNotFoundError:
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from src.config import DATA_DIR, get_conn_str
 
+from src.data_loader import load_papers_from_sql
+
 
 def _connect() -> pyodbc.Connection:
     return pyodbc.connect(get_conn_str())
 
-
-def load_papers_from_sql() -> pd.DataFrame:
-    conn = _connect()
-    try:
-        query = """
-        SELECT
-            p.PaperIndex,
-            p.OpenAlex_ID AS OpenAlexID,
-            CAST(p.Title AS NVARCHAR(MAX)) AS Title,
-            COALESCE(a.Authors, '') AS Authors,
-            p.PublicationYear AS [Year],
-            ISNULL(p.Citations, 0) AS Citations,
-            CAST(p.DOI AS NVARCHAR(512)) AS URL
-        FROM dbo.Papers p
-        OUTER APPLY (
-            SELECT STUFF((
-                SELECT ', ' + pa.AuthorName
-                FROM dbo.PaperAuthors pa
-                WHERE pa.PaperIndex = p.PaperIndex
-                FOR XML PATH(''), TYPE
-            ).value('.', 'NVARCHAR(MAX)'), 1, 2, '') AS Authors
-        ) a
-        WHERE p.Title IS NOT NULL AND LTRIM(RTRIM(CAST(p.Title AS NVARCHAR(MAX)))) <> '' AND p.PublicationYear IS NOT NULL
-        ORDER BY p.PaperIndex ASC;
-        """
-        df = pd.read_sql(query, conn)
-    finally:
-        conn.close()
-
-    return df
 
 
 def load_references_from_sql() -> pd.DataFrame:
@@ -116,6 +88,26 @@ def run_preprocessing() -> None:
     edge_index = build_edge_index(df_papers, df_refs)
     edge_index_path = os.path.join(DATA_DIR, "edge_index.pt")
     torch.save(edge_index, edge_index_path)
+
+    # Phát hiện và báo cáo isolated nodes
+    num_nodes = len(df_papers)
+    node_degrees = torch.zeros(num_nodes, dtype=torch.long)
+    if edge_index.shape[1] > 0:
+        src_nodes = edge_index[0]
+        dst_nodes = edge_index[1]
+        ones = torch.ones(edge_index.shape[1], dtype=torch.long)
+        node_degrees.scatter_add_(0, src_nodes, ones)
+        node_degrees.scatter_add_(0, dst_nodes, ones)
+
+    isolated_mask = (node_degrees == 0)
+    n_isolated = isolated_mask.sum().item()
+    print(f"Isolated nodes (không có citation edge): {n_isolated}/{num_nodes} "
+          f"({100*n_isolated/num_nodes:.1f}%)")
+
+    # Lưu isolated mask để các bước sau có thể xử lý riêng nếu cần
+    isolated_path = os.path.join(DATA_DIR, "isolated_mask.pt")
+    torch.save(isolated_mask, isolated_path)
+    print(f"Saved isolated mask: {isolated_path}")
 
     metadata = df_papers[["PaperIndex", "Title", "Authors", "Year", "Citations", "URL"]].copy()
     metadata_path = os.path.join(DATA_DIR, "metadata.csv")

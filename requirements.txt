@@ -4,6 +4,7 @@ pandas
 scikit-learn
 numpy
 streamlit
+faiss-cpu
 pyodbc
 requests
 sentence-transformers

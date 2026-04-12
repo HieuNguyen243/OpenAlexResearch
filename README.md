@@ -77,7 +77,7 @@ python src/preprocessing.py
 ### Bước 3: Huấn luyện GAT và sinh embedding
 
 ```bash
-
+python src/model_gat.py
 ```
 
 Đầu ra:
