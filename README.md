@@ -51,68 +51,58 @@ pip install -r requirements.txt
 ## Cách chạy toàn bộ pipeline
 
 ### Bước 1: Kiểm tra đọc dữ liệu từ SQL
-
 ```bash
 python src/data_loader.py --limit 20
-```
-
 Tác dụng:
 
-- Kiểm tra kết nối SQL.
-- Đọc dữ liệu từ `dbo.Papers` và gộp tác giả từ `dbo.PaperAuthors`.
-- Lọc dữ liệu rỗng (`Title`, `Year`) để báo số dòng hợp lệ.
+Kiểm tra kết nối SQL.
 
-### Bước 2: Tiền xử lý
+Đọc dữ liệu từ dbo.Papers và gộp tác giả từ dbo.PaperAuthors.
 
-```bash
+Lọc dữ liệu rỗng (Title, Year) để báo số dòng hợp lệ.
+
+Bước 2: Tiền xử lý
+Bash
 python src/preprocessing.py
-```
+Đầu ra trong thư mục data/:
 
-Đầu ra trong thư mục `data/`:
+node_features.pt
 
-- `node_features.pt`
-- `edge_index.pt`
-- `metadata.csv`
+edge_index.pt
 
-### Bước 3: Huấn luyện GAT và sinh embedding
+metadata.csv
 
-```bash
+Bước 3: Huấn luyện GAT và sinh embedding
+Bash
 python src/model_gat.py
-```
-
 Đầu ra:
 
-- `data/smart_embeddings.pt`
-- `data/gat_autoencoder.pt`
+data/smart_embeddings.pt
 
-### Bước 4: (Tùy chọn) kiểm tra ranking bằng script
+data/gat_autoencoder.pt
 
-```bash
-python - <<'PY'
-from src.ranking import build_similarity_index, get_recommendations
+Bước 4: Chạy Offline Pre-computation (Mới)
+Để tối ưu hóa hiệu năng và gỡ bỏ sự phụ thuộc vào PyTorch/FAISS khi chạy giao diện, hệ thống sẽ tính toán trước 100 gợi ý tốt nhất cho mỗi bài báo và lưu ra file JSON tĩnh.
 
-sim = build_similarity_index(force_recompute=True)
-print('similarity shape:', tuple(sim.shape))
-recs = get_recommendations(0, top_n=5)
-print('recommendations:', len(recs))
-print('first:', recs[0] if recs else 'none')
-PY
-```
+Bash
+python src/precompute_recs.py
+Đầu ra:
 
-### Bước 5: Chạy giao diện Streamlit
+data/precomputed_recs.json (Chứa cặp Key-Value lưu thông tin ID liên quan và điểm Cosine).
 
-```bash
+Bước 5: Chạy giao diện Streamlit
+Giao diện giờ đây nhẹ hơn, khởi động cực nhanh và chỉ giao tiếp với file JSON.
+
+Bash
 streamlit run src/app.py
-```
+Logic quan trọng
+Preprocessing chỉ giữ cạnh trích dẫn mà bài được trích dẫn có tồn tại trong tập dữ liệu SQL hiện tại.
 
-## Logic quan trọng
+Mô hình GAT xuất embedding đã normalize L2.
 
-- Preprocessing chỉ giữ cạnh trích dẫn mà bài được trích dẫn có tồn tại trong tập dữ liệu SQL hiện tại.
-- Mô hình GAT xuất embedding đã normalize L2.
-- Ranking ưu tiên `Year` mới hơn, sau đó mới đến điểm cosine giảm dần.
-- App hiển thị đầy đủ: tiêu đề, tác giả, năm, số trích dẫn, điểm tương đồng và link DOI.
+Offline Pre-computation: Giao diện UI sẽ KHÔNG query FAISS real-time. Thay vào đó, nó lấy top_k từ JSON, map với file metadata.csv để lấy lại text, rồi filter theo năm theo thời gian thực (nếu người dùng yêu cầu).
 
-## Trạng thái chạy thử
+App hiển thị đầy đủ: tiêu đề, tác giả, năm, số trích dẫn, điểm tương đồng và link DOI.
 
 Đã chạy thử đủ các giai đoạn trên dữ liệu SQL hiện tại:
 

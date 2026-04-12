@@ -2,32 +2,23 @@ import streamlit as st
 import pandas as pd
 import os
 import sys
+from streamlit_agraph import agraph, Node, Edge, Config
 
-# Add project root to path so `src.*` imports resolve correctly
+# Thêm gốc dự án vào path để import src.*
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.ranking import get_recommendations, build_similarity_index
 from src.config import DATA_DIR
 
-st.set_page_config(page_title="OpenAlex Citation Map", layout="wide")
-st.title("OpenAlex Citation Recommender")
+st.set_page_config(page_title="OpenAlex Citation Map", page_icon="🔗", layout="wide")
 
-
-# ── Singletons (loaded once per app lifetime, shared across all sessions) ─────
-
+# ── Singletons ────────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner="Loading FAISS index…")
 def load_faiss_index():
-    """Load and cache the FAISS index as a process-level singleton."""
     return build_similarity_index(force_recompute=False)
-
 
 @st.cache_resource(show_spinner="Loading metadata…")
 def load_metadata() -> tuple[pd.DataFrame, dict[int, dict]]:
-    """
-    Load metadata.csv once and return:
-    - papers_df  : DataFrame used for the selectbox / display
-    - paper_map  : dict[PaperIndex → row dict] for O(1) title/info lookup
-    """
     metadata_path = os.path.join(DATA_DIR, "metadata.csv")
     df = pd.read_csv(
         metadata_path,
@@ -47,9 +38,7 @@ def load_metadata() -> tuple[pd.DataFrame, dict[int, dict]]:
     }
     return df, paper_map
 
-
 # ── Startup checks ────────────────────────────────────────────────────────────
-
 metadata_path = os.path.join(DATA_DIR, "metadata.csv")
 faiss_path = os.path.join(DATA_DIR, "faiss.index")
 
@@ -61,7 +50,6 @@ if not os.path.exists(faiss_path):
     st.error("❌ `data/faiss.index` not found. Run `python -m src.build_index` first.")
     st.stop()
 
-# Load singletons (cached after first call)
 try:
     load_faiss_index()
 except Exception as exc:
@@ -78,43 +66,54 @@ if papers_df.empty:
     st.warning("No papers found in metadata.csv.")
     st.stop()
 
-# ── UI ────────────────────────────────────────────────────────────────────────
-
+# ── UI SIDEBAR (Bảng điều khiển) ──────────────────────────────────────────────
 options = papers_df["PaperIndex"].tolist()
 
-selected_index = st.selectbox(
-    "Select a paper:",
-    options=options,
-    format_func=lambda pidx: f"[{pidx}] {paper_map[pidx]['Title']}",
-)
+with st.sidebar:
+    st.header("⚙️ Bảng điều khiển")
+    
+    selected_index = st.selectbox(
+        "Chọn một bài báo:",
+        options=options,
+        format_func=lambda pidx: f"[{pidx}] {paper_map[pidx]['Title'][:60]}...",
+    )
+    
+    st.markdown("---")
+    st.markdown("**Lọc theo năm xuất bản**")
+    
+    col_from, col_to = st.columns(2)
+    with col_from:
+        use_year_from = st.checkbox("Từ năm", value=False)
+        year_from = st.number_input(
+            "Năm bắt đầu", min_value=1900, max_value=2025, value=2000, step=1,
+            disabled=not use_year_from, label_visibility="collapsed",
+        ) if use_year_from else None
 
-# Display info for the selected paper
+    with col_to:
+        use_year_to = st.checkbox("Đến năm", value=False)
+        year_to = st.number_input(
+            "Năm kết thúc", min_value=1900, max_value=2025, value=2025, step=1,
+            disabled=not use_year_to, label_visibility="collapsed",
+        ) if use_year_to else None
+
+    top_n = st.slider("Số lượng gợi ý:", min_value=3, max_value=50, value=10, step=1)
+    
+    search_clicked = st.button("🔍 Find related papers", use_container_width=True, type="primary")
+
+# ── MAIN PANEL (Không gian chính) ─────────────────────────────────────────────
+st.title("🚀 OpenAlex Citation Recommender")
+
+# Lấy thông tin bài báo đang chọn
 info = paper_map[selected_index]
 year_display = int(info["Year"]) if not pd.isna(info.get("Year", float("nan"))) else "N/A"
-st.caption(
-    f"**{info['Title']}** | Year: {year_display} | Citations: {info['Citations']}"
-)
 
-st.markdown("**Lọc theo năm xuất bản (tùy chọn)**")
-col1, col2 = st.columns(2)
-with col1:
-    use_year_from = st.checkbox("Từ năm", value=False)
-    year_from = st.number_input(
-        "Năm bắt đầu", min_value=1900, max_value=2025, value=2000, step=1,
-        disabled=not use_year_from, label_visibility="collapsed",
-    ) if use_year_from else None
+with st.container(border=True):
+    st.markdown("### 🎯 Target Paper")
+    st.markdown(f"**{info['Title']}**")
+    st.caption(f"✍️ **Tác giả:** {info['Authors'] or 'N/A'} | 📅 **Năm:** {year_display} | 📊 **Trích dẫn:** {info['Citations']}")
 
-with col2:
-    use_year_to = st.checkbox("Đến năm", value=False)
-    year_to = st.number_input(
-        "Năm kết thúc", min_value=1900, max_value=2025, value=2025, step=1,
-        disabled=not use_year_to, label_visibility="collapsed",
-    ) if use_year_to else None
-
-top_n = st.slider("Number of recommendations", min_value=3, max_value=20, value=8, step=1)
-
-if st.button("🔍 Find related papers"):
-    with st.spinner("Searching for similar papers…"):
+if search_clicked:
+    with st.spinner("Đang tìm kiếm mạng lưới tương đồng…"):
         try:
             recs = get_recommendations(
                 selected_index,
@@ -127,20 +126,69 @@ if st.button("🔍 Find related papers"):
             st.stop()
 
     if not recs:
-        st.info("No recommendations found. Try relaxing the year filter or selecting a different paper.")
+        st.info("Không tìm thấy kết quả. Thử nới lỏng bộ lọc năm hoặc chọn bài báo khác.")
     else:
-        st.subheader(f"Related Papers ({len(recs)} results)")
-        current_year = None
-        for rec in recs:
-            year = rec.get("Year")
-            if year != current_year:
-                current_year = year
-                st.markdown(f"### 📅 {year if year else 'Unknown Year'}")
-
-            st.markdown(f"**[{rec['PaperIndex']}] {rec['Title']}**")
-            st.write(f"Authors: {rec.get('Authors') or 'N/A'}")
-            st.write(f"Citations: {rec.get('Citations', 0)} | Cosine score: {rec['Score']:.4f}")
-            url = (rec.get("URL") or "").strip()
-            if url:
-                st.link_button("🔗 Open DOI", url)
-            st.divider()
+        st.subheader(f"Kết quả phân tích ({len(recs)} bài báo)")
+        
+        # Hệ thống Tabs
+        tab1, tab2 = st.tabs(["🌐 Network Graph", "📋 List View"])
+        
+        # --- TAB 1: TRỰC QUAN HÓA ĐỒ THỊ ---
+        with tab1:
+            nodes = []
+            edges = []
+            
+            # Hàm rút gọn nhãn để tránh node bị tràn chữ
+            def truncate_label(text, length=30):
+                return text[:length] + "..." if len(text) > length else text
+            
+            # Node Trung tâm (Màu đỏ nổi bật, kích thước lớn)
+            nodes.append(Node(
+                id=str(selected_index),
+                label=truncate_label(info['Title']),
+                size=25,
+                color="#FF4B4B",
+                title=f"TARGET: {info['Title']} ({year_display})"
+            ))
+            
+            # Các Node vệ tinh (Kết quả gợi ý)
+            for rec in recs:
+                rec_year = int(rec['Year']) if rec.get('Year') and not pd.isna(rec['Year']) else 'N/A'
+                nodes.append(Node(
+                    id=str(rec['PaperIndex']),
+                    label=truncate_label(rec['Title']),
+                    size=15,
+                    color="#0068C9",
+                    title=f"{rec['Title']}\nNăm: {rec_year} | Điểm Score: {rec['Score']:.4f}"
+                ))
+                
+                # Tạo cạnh nối từ Target đến Vệ tinh
+                edges.append(Edge(
+                    source=str(selected_index),
+                    target=str(rec['PaperIndex'])
+                ))
+                
+            # Cấu hình đồ thị (Bật vật lý physics để các node tự đẩy nhau đẹp mắt)
+            config = Config(width=800, height=500, directed=True, physics=True, hierarchical=False)
+            
+            # Render Agraph
+            agraph(nodes=nodes, edges=edges, config=config)
+            
+        # --- TAB 2: DANH SÁCH CHI TIẾT ---
+        with tab2:
+            for rec in recs:
+                with st.container(border=True):
+                    col1, col2 = st.columns([4, 1])
+                    
+                    with col1:
+                        rec_year = int(rec['Year']) if rec.get('Year') and not pd.isna(rec['Year']) else 'N/A'
+                        st.markdown(f"**[{rec['PaperIndex']}] {rec['Title']}** ({rec_year})")
+                        st.caption(f"Tác giả: {rec.get('Authors') or 'N/A'}")
+                        
+                    with col2:
+                        # Hiển thị độ tương đồng với Metric Component
+                        st.metric("Cosine Score", value=f"{rec['Score']:.4f}")
+                        
+                        url = (rec.get("URL") or "").strip()
+                        if url:
+                            st.link_button("🔗 DOI", url)
