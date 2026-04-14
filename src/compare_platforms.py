@@ -4,7 +4,25 @@ import time
 import re
 import urllib.parse
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import pandas as pd
+
+# ── Khởi tạo Session chống Block IP (Exponential Backoff) ──
+def get_robust_session():
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=5,                # Thử lại tối đa 5 lần
+        backoff_factor=2.0,     # Tăng dần thời gian chờ: 2s, 4s, 8s, 16s...
+        status_forcelist=[429, 500, 502, 503, 504], # Trigger retry khi bị Timeout hoặc Rate Limited
+        allowed_methods=["HEAD", "GET", "OPTIONS"]
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+http_client = get_robust_session()
 
 # Thêm path dự án
 try:
@@ -16,7 +34,7 @@ except ModuleNotFoundError:
 from src.ranking import get_recommendations
 
 def normalize_title(title):
-    if not title:
+    if pd.isna(title) or not title:
         return ""
     # Lowercase, remove punctuation, strip whitespaces
     title = str(title).lower().strip()
@@ -49,7 +67,7 @@ def get_s2_recs(paper_title, top_n=20):
         # Step 1: Search paper ID
         encoded_query = urllib.parse.quote(paper_title)
         search_url = f"https://api.semanticscholar.org/graph/v1/paper/search?query={encoded_query}&limit=1"
-        res = requests.get(search_url, timeout=15)
+        res = http_client.get(search_url, timeout=15)
         res.raise_for_status()
         data = res.json()
         
@@ -61,7 +79,7 @@ def get_s2_recs(paper_title, top_n=20):
         
         # Step 2: Get recommendations
         rec_url = f"https://api.semanticscholar.org/recommendations/v1/papers/forpaper/{paper_id}?limit={top_n}&fields=title"
-        res2 = requests.get(rec_url, timeout=15)
+        res2 = http_client.get(rec_url, timeout=15)
         res2.raise_for_status()
         rec_data = res2.json()
         
@@ -82,7 +100,7 @@ def get_openalex_recs(paper_title, top_n=20):
         
         # Step 1: Search by exact title snippet
         search_url = f"https://api.openalex.org/works?filter=display_name.search:{encoded_title}"
-        res = requests.get(search_url, headers=headers, timeout=15)
+        res = http_client.get(search_url, headers=headers, timeout=15)
         res.raise_for_status()
         data = res.json()
         
@@ -98,11 +116,11 @@ def get_openalex_recs(paper_title, top_n=20):
         # Step 2: Grab up to top_n
         related_ids = [w.replace("https://openalex.org/", "") for w in related_works_urls[:top_n]]
         
-        time.sleep(1) # Rate limit
+        time.sleep(1) # Bổ sung thêm hard-sleep chống bạo lực Request
         query_ids = "|".join(related_ids)
-        details_url = f"https://api.openalex.org/works?filter=openalex:{query_ids}&select=display_name"
+        details_url = f"https://api.openalex.org/works?filter=openalex:{query_ids}&select=display_name&per_page={top_n}"
         
-        res2 = requests.get(details_url, headers=headers, timeout=15)
+        res2 = http_client.get(details_url, headers=headers, timeout=15)
         res2.raise_for_status()
         details_data = res2.json()
         
