@@ -8,6 +8,9 @@ faiss-cpu
 pyodbc
 requests
 sentence-transformers
+tabulate
+tqdm
+streamlit-agraph
 
 # Optional but recommended for full PyG support/performance
 pyg-lib
