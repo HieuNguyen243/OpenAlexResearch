@@ -10,14 +10,83 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.ranking import get_recommendations, build_similarity_index
 from src.config import DATA_DIR
 
-st.set_page_config(page_title="OpenAlex Citation Map", page_icon="🔗", layout="wide")
+# Cấu hình trang - Loại bỏ icon, giữ layout rộng
+st.set_page_config(page_title="OpenAlex Citation Analysis", layout="wide")
+
+# CSS: Phong cách tối giản, học thuật, sử dụng tone màu trung tính
+st.markdown("""
+    <style>
+    /* Nút bấm mặc định: Xám tối giản, không bo góc quá tròn */
+    div.stButton > button {
+        border-radius: 4px;
+        font-weight: 600;
+        border: 1px solid #cbd5e1;
+        background-color: #f8fafc;
+        color: #334155;
+        transition: all 0.2s;
+    }
+    div.stButton > button:hover {
+        border-color: #94a3b8;
+        background-color: #e2e8f0;
+        color: #0f172a;
+    }
+    
+    /* Thẻ thông tin bài báo mục tiêu: Viền mảnh, điểm nhấn bên trái */
+    .target-card {
+        padding: 24px;
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-left: 4px solid #334155;
+        margin-bottom: 24px;
+        border-radius: 4px;
+    }
+    .target-label {
+        font-size: 0.85rem;
+        font-weight: 700;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 8px;
+        display: block;
+    }
+    .target-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #0f172a;
+        margin-top: 0;
+        margin-bottom: 12px;
+    }
+    .target-meta {
+        font-size: 0.95rem;
+        color: #475569;
+        margin: 4px 0;
+    }
+    
+    /* Hỗ trợ giao diện tối (Dark Mode) */
+    @media (prefers-color-scheme: dark) {
+        .target-card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-left: 4px solid #94a3b8;
+        }
+        .target-label { color: #94a3b8; }
+        .target-title { color: #f8fafc; }
+        .target-meta { color: #cbd5e1; }
+        div.stButton > button {
+            background-color: #1e293b;
+            border-color: #334155;
+            color: #e2e8f0;
+        }
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # ── Singletons ────────────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner="Loading FAISS index…")
+@st.cache_resource(show_spinner="Loading FAISS index...")
 def load_faiss_index():
     return build_similarity_index(force_recompute=False)
 
-@st.cache_resource(show_spinner="Loading metadata…")
+@st.cache_resource(show_spinner="Loading metadata...")
 def load_metadata() -> tuple[pd.DataFrame, dict[int, dict]]:
     metadata_path = os.path.join(DATA_DIR, "metadata.csv")
     df = pd.read_csv(
@@ -43,81 +112,91 @@ metadata_path = os.path.join(DATA_DIR, "metadata.csv")
 faiss_path = os.path.join(DATA_DIR, "faiss.index")
 
 if not os.path.exists(metadata_path):
-    st.error("❌ `data/metadata.csv` not found. Run `preprocessing.py` first.")
+    st.error("System Error: 'data/metadata.csv' not found. Please run preprocessing script.")
     st.stop()
 
 if not os.path.exists(faiss_path):
-    st.error("❌ `data/faiss.index` not found. Run `python -m src.build_index` first.")
+    st.error("System Error: 'data/faiss.index' not found. Please run build_index module.")
     st.stop()
 
 try:
     load_faiss_index()
-except Exception as exc:
-    st.error(f"Failed to load FAISS index: {exc}")
-    st.stop()
-
-try:
     papers_df, paper_map = load_metadata()
 except Exception as exc:
-    st.error(f"Failed to load metadata.csv: {exc}")
+    st.error(f"Initialization failed: {exc}")
     st.stop()
 
 if papers_df.empty:
-    st.warning("No papers found in metadata.csv.")
+    st.warning("Database is empty. No metadata found.")
     st.stop()
 
-# ── UI SIDEBAR (Bảng điều khiển) ──────────────────────────────────────────────
+# ── UI SIDEBAR ────────────────────────────────────────────────────────────────
 options = papers_df["PaperIndex"].tolist()
 
 with st.sidebar:
-    st.header("⚙️ Bảng điều khiển")
+    st.title("Configuration")
+    st.markdown("Set parameters for citation network analysis.")
+    st.markdown("---")
     
+    st.markdown("**Target Document**")
     selected_index = st.selectbox(
-        "Chọn một bài báo:",
+        "Select Paper",
         options=options,
         format_func=lambda pidx: f"[{pidx}] {paper_map[pidx]['Title'][:60]}...",
+        label_visibility="collapsed"
     )
     
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("**Filter Criteria**")
+    with st.expander("Publication Year", expanded=True):
+        col_from, col_to = st.columns(2)
+        with col_from:
+            use_year_from = st.checkbox("From", value=False)
+            year_from = st.number_input(
+                "Start Year", min_value=1900, max_value=2025, value=2000, step=1,
+                disabled=not use_year_from, label_visibility="collapsed",
+            ) if use_year_from else None
+
+        with col_to:
+            use_year_to = st.checkbox("To", value=False)
+            year_to = st.number_input(
+                "End Year", min_value=1900, max_value=2025, value=2025, step=1,
+                disabled=not use_year_to, label_visibility="collapsed",
+            ) if use_year_to else None
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("**Output Settings**")
+    top_n = st.slider("Result Count (Top N)", min_value=3, max_value=50, value=10, step=1)
+    
     st.markdown("---")
-    st.markdown("**Lọc theo năm xuất bản**")
-    
-    col_from, col_to = st.columns(2)
-    with col_from:
-        use_year_from = st.checkbox("Từ năm", value=False)
-        year_from = st.number_input(
-            "Năm bắt đầu", min_value=1900, max_value=2025, value=2000, step=1,
-            disabled=not use_year_from, label_visibility="collapsed",
-        ) if use_year_from else None
+    search_clicked = st.button("Run Analysis", use_container_width=True)
 
-    with col_to:
-        use_year_to = st.checkbox("Đến năm", value=False)
-        year_to = st.number_input(
-            "Năm kết thúc", min_value=1900, max_value=2025, value=2025, step=1,
-            disabled=not use_year_to, label_visibility="collapsed",
-        ) if use_year_to else None
+# ── MAIN PANEL ────────────────────────────────────────────────────────────────
+st.title("OpenAlex Citation Analysis")
+st.markdown("Vector-based similarity search for academic literature.")
 
-    top_n = st.slider("Số lượng gợi ý:", min_value=3, max_value=50, value=10, step=1)
-    
-    search_clicked = st.button("🔍 Find related papers", use_container_width=True, type="primary")
-
-# ── MAIN PANEL (Không gian chính) ─────────────────────────────────────────────
-st.title("🚀 OpenAlex Citation Recommender")
-
-# Lấy thông tin bài báo đang chọn
+# Hiển thị Target Paper Card
 info = paper_map[selected_index]
 year_display = int(info["Year"]) if not pd.isna(info.get("Year", float("nan"))) else "N/A"
+url = (info.get("URL") or "").strip()
 
-with st.container(border=True):
-    st.markdown("### 🎯 Target Paper")
-    st.markdown(f"**{info['Title']}**")
-    st.caption(f"✍️ **Tác giả:** {info['Authors'] or 'N/A'} | 📅 **Năm:** {year_display} | 📊 **Trích dẫn:** {info['Citations']}")
-    
-    url = (info.get("URL") or "").strip()
-    if url:
-        st.link_button("🔗 DOI", url)
+st.markdown(f"""
+<div class="target-card">
+    <span class="target-label">Target Document</span>
+    <h3 class="target-title">{info['Title']}</h3>
+    <p class="target-meta"><b>Authors:</b> {info['Authors'] or 'Unknown'}</p>
+    <p class="target-meta"><b>Year:</b> {year_display} &nbsp;|&nbsp; <b>Citations:</b> {info['Citations']}</p>
+</div>
+""", unsafe_allow_html=True)
 
+if url:
+    st.link_button("View Original Source", url)
+
+st.markdown("---")
+
+# Xử lý Kết quả
 if search_clicked:
-    with st.spinner("Đang tìm kiếm mạng lưới tương đồng…"):
+    with st.spinner("Computing vector similarities..."):
         try:
             recs = get_recommendations(
                 selected_index,
@@ -126,73 +205,80 @@ if search_clicked:
                 year_to=int(year_to) if year_to is not None else None,
             )
         except Exception as exc:
-            st.error(f"Recommendation failed: {exc}")
+            st.error(f"Analysis failed: {exc}")
             st.stop()
 
     if not recs:
-        st.info("Không tìm thấy kết quả. Thử nới lỏng bộ lọc năm hoặc chọn bài báo khác.")
+        st.info("No matching results found. Consider relaxing the year filters.")
     else:
-        st.subheader(f"Kết quả phân tích ({len(recs)} bài báo)")
+        st.subheader(f"Analysis Results ({len(recs)} documents)")
         
-        # Hệ thống Tabs
-        tab1, tab2 = st.tabs(["🌐 Network Graph", "📋 List View"])
+        tab1, tab2 = st.tabs(["Network Graph", "Detailed List"])
         
         # --- TAB 1: TRỰC QUAN HÓA ĐỒ THỊ ---
         with tab1:
             nodes = []
             edges = []
             
-            # Hàm rút gọn nhãn để tránh node bị tràn chữ
-            def truncate_label(text, length=30):
+            def truncate_label(text, length=35):
                 return text[:length] + "..." if len(text) > length else text
             
-            # Node Trung tâm (Màu đỏ nổi bật, kích thước lớn)
+            # Node Trung tâm (Màu Xám đậm - Charcoal)
             nodes.append(Node(
                 id=str(selected_index),
                 label=truncate_label(info['Title']),
                 size=25,
-                color="#FF4B4B",
+                color="#334155", 
+                shape="square",
                 title=f"TARGET: {info['Title']} ({year_display})"
             ))
             
-            # Các Node vệ tinh (Kết quả gợi ý)
+            # Các Node vệ tinh (Màu Bạc/Xám nhạt - Silver)
             for rec in recs:
                 rec_year = int(rec['Year']) if rec.get('Year') and not pd.isna(rec['Year']) else 'N/A'
                 nodes.append(Node(
                     id=str(rec['PaperIndex']),
                     label=truncate_label(rec['Title']),
                     size=15,
-                    color="#0068C9",
-                    title=f"{rec['Title']}\nNăm: {rec_year} | Điểm Score: {rec['Score']:.4f}"
+                    color="#94a3b8",
+                    title=f"{rec['Title']}\nYear: {rec_year} | Score: {rec['Score']:.4f}"
                 ))
                 
-                # Tạo cạnh nối từ Target đến Vệ tinh
                 edges.append(Edge(
                     source=str(selected_index),
-                    target=str(rec['PaperIndex'])
+                    target=str(rec['PaperIndex']),
+                    color="#e2e8f0"
                 ))
                 
-            # Cấu hình đồ thị (Bật vật lý physics để các node tự đẩy nhau đẹp mắt)
-            config = Config(width=800, height=500, directed=True, physics=True, hierarchical=False)
+            config = Config(
+                width="100%", 
+                height=600, 
+                directed=True, 
+                physics=True, 
+                hierarchical=False,
+                interaction={'hover': True, 'zoomView': True}
+            )
             
-            # Render Agraph
             agraph(nodes=nodes, edges=edges, config=config)
             
         # --- TAB 2: DANH SÁCH CHI TIẾT ---
         with tab2:
-            for rec in recs:
-                with st.container(border=True):
-                    col1, col2 = st.columns([4, 1])
+            for i, rec in enumerate(recs):
+                rec_year = int(rec['Year']) if rec.get('Year') and not pd.isna(rec['Year']) else 'N/A'
+                
+                # Sử dụng đường viền tối giản thay vì thẻ nổi
+                st.markdown(f"#### {i+1}. {rec['Title']}")
+                col1, col2 = st.columns([5, 1])
+                
+                with col1:
+                    st.markdown(f"<span style='color: #475569;'><b>Authors:</b> {rec.get('Authors') or 'Unknown'}</span>", unsafe_allow_html=True)
+                    st.markdown(f"<span style='color: #64748b; font-size: 0.9em;'>ID: {rec['PaperIndex']} &nbsp;|&nbsp; Year: {rec_year}</span>", unsafe_allow_html=True)
                     
-                    with col1:
-                        rec_year = int(rec['Year']) if rec.get('Year') and not pd.isna(rec['Year']) else 'N/A'
-                        st.markdown(f"**[{rec['PaperIndex']}] {rec['Title']}** ({rec_year})")
-                        st.caption(f"Tác giả: {rec.get('Authors') or 'N/A'}")
-                        
-                    with col2:
-                        # Hiển thị độ tương đồng với Metric Component
-                        st.metric("Cosine Score", value=f"{rec['Score']:.4f}")
-                        
-                        url = (rec.get("URL") or "").strip()
-                        if url:
-                            st.link_button("🔗 DOI", url)
+                    rec_url = (rec.get("URL") or "").strip()
+                    if rec_url:
+                        st.markdown(f"<a href='{rec_url}' target='_blank' style='font-size: 0.9em; text-decoration: none; color: #3b82f6;'>View Source</a>", unsafe_allow_html=True)
+                
+                with col2:
+                    st.metric("Similarity", value=f"{rec['Score']:.3f}")
+                
+                st.markdown("<hr style='margin-top: 10px; margin-bottom: 20px; border-top: 1px solid #f1f5f9;'>", unsafe_allow_html=True)
