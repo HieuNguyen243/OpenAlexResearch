@@ -2,9 +2,9 @@
 
 File: config.py: Kết nối đến sql server để lấy dữ liệu
 
-    data_loader.py: Lấy dữ liệu từ sql, loại bỏ những bản ghi thiếu title hoặc thiếu năm, chuẩn hóa ciation về số nguyên và trả về file metadata.csv
+    data_loader.py: Lấy dữ liệu từ sql, loại bỏ những bản ghi thiếu title hoặc thiếu năm, chuẩn hóa citation về số nguyên trước khi tiền xử lý.
 
-    preprrocessing.py: là node_feaures.pt (lưu trữ vector embedding từ tiêu đề) và edge_index.pt (mỗi cột là một cạnh có hướng source -> target giữa 2 bài báo.)
+    preprocessing.py: Đầu ra là node_features.pt (vector embedding), edge_index.pt (cạnh đồ thị) và metadata.csv (thông tin phục vụ hiển thị UI).
 
 ## Mục tiêu
 
@@ -81,17 +81,8 @@ data/smart_embeddings.pt
 
 data/gat_autoencoder.pt
 
-Bước 4: Chạy Offline Pre-computation (Mới)
-Để tối ưu hóa hiệu năng và gỡ bỏ sự phụ thuộc vào PyTorch/FAISS khi chạy giao diện, hệ thống sẽ tính toán trước 100 gợi ý tốt nhất cho mỗi bài báo và lưu ra file JSON tĩnh.
-
-Bash
-python src/precompute_recs.py
-Đầu ra:
-
-data/precomputed_recs.json (Chứa cặp Key-Value lưu thông tin ID liên quan và điểm Cosine).
-
-Bước 5: Chạy giao diện Streamlit
-Giao diện giờ đây nhẹ hơn, khởi động cực nhanh và chỉ giao tiếp với file JSON.
+Bước 4: Chạy giao diện Streamlit
+Giao diện Streamlit cung cấp hệ thống gợi ý và trực quan hoá mạng lưới trích dẫn, truy vấn FAISS index theo thời gian thực.
 
 Bash
 streamlit run src/app.py
@@ -100,7 +91,7 @@ Preprocessing chỉ giữ cạnh trích dẫn mà bài được trích dẫn có
 
 Mô hình GAT xuất embedding đã normalize L2.
 
-Offline Pre-computation: Giao diện UI sẽ KHÔNG query FAISS real-time. Thay vào đó, nó lấy top_k từ JSON, map với file metadata.csv để lấy lại text, rồi filter theo năm theo thời gian thực (nếu người dùng yêu cầu).
+Truy vấn FAISS trực tiếp: Hệ thống tìm kiếm K-NN vector theo thời gian thực trên FAISS index, cho phép lọc năm động ngay khi có yêu cầu.
 
 App hiển thị đầy đủ: tiêu đề, tác giả, năm, số trích dẫn, điểm tương đồng và link DOI.
 

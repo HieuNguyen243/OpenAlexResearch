@@ -111,6 +111,10 @@ with st.container(border=True):
     st.markdown("### 🎯 Target Paper")
     st.markdown(f"**{info['Title']}**")
     st.caption(f"✍️ **Tác giả:** {info['Authors'] or 'N/A'} | 📅 **Năm:** {year_display} | 📊 **Trích dẫn:** {info['Citations']}")
+    
+    url = (info.get("URL") or "").strip()
+    if url:
+        st.link_button("🔗 DOI", url)
 
 if search_clicked:
     with st.spinner("Đang tìm kiếm mạng lưới tương đồng…"):
