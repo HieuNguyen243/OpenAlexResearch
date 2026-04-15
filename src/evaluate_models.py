@@ -41,7 +41,6 @@ def train_gat_model(model, train_data, val_data, epochs=50, lr=1e-3, device='cpu
             batch = batch.to(device)
             optimizer.zero_grad()
             z = model(batch.x, batch.edge_index)
-            # Use same contrastive loss
             loss = citation_contrastive_loss(z, batch.edge_label_index, margin=0.5)
             loss.backward()
             optimizer.step()
@@ -63,7 +62,8 @@ def train_node2vec(edge_index, num_nodes, device, embedding_dim=128):
         walks_per_node=10,
         num_negative_samples=1, 
         p=1, q=1, 
-        sparse=True
+        sparse=True,
+        num_nodes=num_nodes  # Đã thêm num_nodes để fix lỗi IndexError của Node2Vec
     ).to(device)
     
     loader = model.loader(batch_size=128, shuffle=True, num_workers=0)
@@ -101,7 +101,10 @@ def get_node_embeddings(model, data, device):
     )
     model.eval()
     
-    z_temp = model(data.x[:2].to(device), data.edge_index[:, :1].to(device))
+    # [ĐÃ FIX] Sử dụng cạnh giả an toàn để test dimension, tránh lỗi Out-Of-Bounds
+    dummy_x = data.x[:2].to(device)
+    dummy_edge = torch.tensor([[0, 1], [1, 0]], dtype=torch.long, device=device)
+    z_temp = model(dummy_x, dummy_edge)
     out_channels = z_temp.shape[1]
     
     all_embeddings = torch.zeros(data.num_nodes, out_channels)
@@ -123,14 +126,13 @@ def evaluate_link_prediction(z, edge_label_index, edge_label):
     z_src = z[src]
     z_dst = z[dst]
     
-    # Cosine Similarity
-    scores = F.cosine_similarity(z_src, z_dst).cpu().numpy()
-    labels = edge_label.cpu().numpy()
+    # [ĐÃ FIX] Thêm .detach() để tránh lỗi RuntimeError với Numpy
+    scores = F.cosine_similarity(z_src, z_dst).detach().cpu().numpy()
+    labels = edge_label.detach().cpu().numpy()
     return roc_auc_score(labels, scores)
 
 def compute_ranking_metrics(z, test_data, num_samples=500):
     device = z.device
-    num_nodes = z.shape[0]
     
     # Positives only
     pos_mask = test_data.edge_label == 1
@@ -180,8 +182,9 @@ def run_evaluation_pipeline():
         print(f"Error: Could not find {features_path} or {edges_path}. Run preprocessing first.")
         return
         
-    x = torch.load(features_path).to(dtype=torch.float32)
-    edge_index = torch.load(edges_path)
+    # [ĐÃ FIX] Thêm weights_only=True để tắt cảnh báo FutureWarning
+    x = torch.load(features_path, weights_only=True).to(dtype=torch.float32)
+    edge_index = torch.load(edges_path, weights_only=True)
     
     graph_data = Data(x=x, edge_index=edge_index)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
