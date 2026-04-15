@@ -100,6 +100,7 @@ def train_and_get_embeddings(
         return roc_auc_score(labels, scores)
 
     try:
+        gat_losses = []
         for epoch in range(1, epochs + 1):
             model.train()
             total_loss = 0
@@ -112,6 +113,7 @@ def train_and_get_embeddings(
                 optimizer.step()
                 total_loss += loss.item()
             avg_loss = total_loss / len(train_loader)
+            gat_losses.append(avg_loss)
             if epoch == 1 or epoch % 20 == 0 or epoch == epochs:
                 auc = validate(model, val_data, device)
                 print(f"Epoch {epoch:03d}/{epochs} - Loss: {avg_loss:.6f} - Val AUC: {auc:.4f}")
@@ -149,6 +151,11 @@ def train_and_get_embeddings(
     torch.save(model.state_dict(), model_path)
     print(f"Saved normalized embeddings: {output_path} shape={tuple(embeddings.shape)}")
     print(f"Saved model checkpoint: {model_path}")
+    try:
+        print(f"Final training loss (last epoch): {gat_losses[-1]:.6f}")
+    except Exception:
+        pass
+    return embeddings, gat_losses
 
 if __name__ == "__main__":
     train_and_get_embeddings()

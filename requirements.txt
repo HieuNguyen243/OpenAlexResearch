@@ -3,6 +3,7 @@ torch-geometric
 pandas
 scikit-learn
 numpy
+matplotlib
 streamlit
 faiss-cpu
 pyodbc
