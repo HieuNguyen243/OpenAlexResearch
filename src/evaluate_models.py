@@ -4,10 +4,11 @@ import torch
 import torch.nn.functional as F
 import pandas as pd
 from torch_geometric.data import Data
-from torch_geometric.nn import GCNConv
 from torch_geometric.transforms import RandomLinkSplit
 from torch_geometric.loader import LinkNeighborLoader, NeighborLoader
+from torch_geometric.nn import Node2Vec
 from sklearn.metrics import roc_auc_score
+from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm import tqdm
 
 try:
@@ -18,24 +19,8 @@ except ModuleNotFoundError:
     
 from src.model_gat import GATModel, citation_contrastive_loss
 
-# 1. Baseline 2: Standard GCN
-class GCNModel(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, dropout=0.2):
-        super().__init__()
-        self.dropout = dropout
-        self.conv1 = GCNConv(in_channels, hidden_channels)
-        self.conv2 = GCNConv(hidden_channels, out_channels)
 
-    def forward(self, x, edge_index):
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.conv1(x, edge_index)
-        x = F.elu(x)
-        x = F.dropout(x, p=self.dropout, training=self.training)
-        x = self.conv2(x, edge_index)
-        return x
-
-# 2. Reusable Training Function
-def train_model(model, train_data, val_data, epochs=50, lr=1e-3, device='cpu'):
+def train_gat_model(model, train_data, val_data, epochs=50, lr=1e-3, device='cpu'):
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=5e-4)
     model = model.to(device)
     
@@ -68,7 +53,44 @@ def train_model(model, train_data, val_data, epochs=50, lr=1e-3, device='cpu'):
             
     return model
 
-# 3. Embedding Generation
+
+def train_node2vec(edge_index, num_nodes, device, embedding_dim=128):
+    model = Node2Vec(
+        edge_index, 
+        embedding_dim=embedding_dim, 
+        walk_length=20,
+        context_size=10, 
+        walks_per_node=10,
+        num_negative_samples=1, 
+        p=1, q=1, 
+        sparse=True
+    ).to(device)
+    
+    loader = model.loader(batch_size=128, shuffle=True, num_workers=0)
+    optimizer = torch.optim.SparseAdam(list(model.parameters()), lr=0.01)
+    
+    print(f"--- Training Node2Vec ---")
+    for epoch in range(1, 11): 
+        model.train()
+        total_loss = 0
+        for pos_rw, neg_rw in loader:
+            optimizer.zero_grad()
+            loss = model.loss(pos_rw.to(device), neg_rw.to(device))
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item()
+        
+        avg_loss = total_loss / len(loader)
+        if epoch == 1 or epoch % 2 == 0 or epoch == 10:
+            print(f"Epoch {epoch:02d}/10 - Loss: {avg_loss:.4f}")
+            
+    model.eval()
+    with torch.no_grad():
+        z = model()
+    
+    return F.normalize(z, p=2, dim=1)
+
+# 3. Embedding Generation for GAT
 def get_node_embeddings(model, data, device):
     node_loader = NeighborLoader(
         data,
@@ -79,7 +101,6 @@ def get_node_embeddings(model, data, device):
     )
     model.eval()
     
-    # Figure out out_channels dynamically
     z_temp = model(data.x[:2].to(device), data.edge_index[:, :1].to(device))
     out_channels = z_temp.shape[1]
     
@@ -152,6 +173,7 @@ def compute_ranking_metrics(z, test_data, num_samples=500):
 def run_evaluation_pipeline():
     features_path = os.path.join(DATA_DIR, "node_features.pt")
     edges_path = os.path.join(DATA_DIR, "edge_index.pt")
+    metadata_path = os.path.join(DATA_DIR, "metadata.csv")
     
     print("Loading graph data...")
     if not os.path.exists(features_path) or not os.path.exists(edges_path):
@@ -178,18 +200,49 @@ def run_evaluation_pipeline():
     results = []
     
     # ==========================================
-    # Baseline 1: Raw Features (No-GNN)
+    # Baseline 1: TF-IDF (Pure Lexical, No-Graph, No-Semantics)
     # ==========================================
-    print("\n[Baseline 1] Evaluating Raw Features (No-GNN)...")
-    z_raw = F.normalize(x, p=2, dim=1).to(device)
-    raw_auc = evaluate_link_prediction(z_raw, test_data.edge_label_index, test_data.edge_label)
-    raw_mrr, raw_hit10 = compute_ranking_metrics(z_raw, test_data)
+    print("\n[Baseline 1] Evaluating TF-IDF (Pure Lexical)...")
+    if os.path.exists(metadata_path):
+        # Read Original Titles
+        df_meta = pd.read_csv(metadata_path)
+        titles = df_meta["Title"].fillna("").astype(str).tolist()
+        
+        vectorizer = TfidfVectorizer(max_features=512)
+        tfidf_matrix = vectorizer.fit_transform(titles).toarray()
+        
+        z_tfidf = torch.tensor(tfidf_matrix, dtype=torch.float32).to(device)
+        z_tfidf = F.normalize(z_tfidf, p=2, dim=1)
+        
+        tfidf_auc = evaluate_link_prediction(z_tfidf, test_data.edge_label_index, test_data.edge_label)
+        tfidf_mrr, tfidf_hit10 = compute_ranking_metrics(z_tfidf, test_data)
+        
+        results.append({
+            "Model": "TF-IDF (Pure Lexical)",
+            "ROC-AUC": tfidf_auc,
+            "MRR": tfidf_mrr,
+            "Hit@10": tfidf_hit10
+        })
+    else:
+        print(f"Warning: {metadata_path} not found. Skipping TF-IDF Baseline.")
+
+    # ==========================================
+    # Baseline 2: Node2Vec (Pure Graph, No-Text)
+    # ==========================================
+    print("\n[Baseline 2] Training & Evaluating Node2Vec (Pure Graph)...")
+    # Make edges undirected for Node2Vec to discover structural communities better
+    undirected_train_edges = torch.cat([train_data.edge_index, train_data.edge_index[[1, 0]]], dim=1)
+    
+    z_n2v = train_node2vec(undirected_train_edges, graph_data.num_nodes, device, embedding_dim=128)
+    
+    n2v_auc = evaluate_link_prediction(z_n2v, test_data.edge_label_index, test_data.edge_label)
+    n2v_mrr, n2v_hit10 = compute_ranking_metrics(z_n2v, test_data)
     
     results.append({
-        "Model": "Raw SBERT Features (No-GNN)",
-        "ROC-AUC": raw_auc,
-        "MRR": raw_mrr,
-        "Hit@10": raw_hit10
+        "Model": "Node2Vec (Pure Graph Structure)",
+        "ROC-AUC": n2v_auc,
+        "MRR": n2v_mrr,
+        "Hit@10": n2v_hit10
     })
     
     # Model configs
@@ -199,36 +252,18 @@ def run_evaluation_pipeline():
     epochs = 60  
     
     # ==========================================
-    # Baseline 2: GCN Model
+    # Proposed System: GATv2 + SBERT
     # ==========================================
-    print("\n[Baseline 2] Training & Evaluating GCN...")
-    gcn = GCNModel(in_channels, hidden_channels, out_channels)
-    gcn = train_model(gcn, train_data, val_data, epochs=epochs, device=device)
-    z_gcn = get_node_embeddings(gcn, test_data, device)
-    
-    gcn_auc = evaluate_link_prediction(z_gcn, test_data.edge_label_index, test_data.edge_label)
-    gcn_mrr, gcn_hit10 = compute_ranking_metrics(z_gcn, test_data)
-    
-    results.append({
-        "Model": "GCN (Baseline)",
-        "ROC-AUC": gcn_auc,
-        "MRR": gcn_mrr,
-        "Hit@10": gcn_hit10
-    })
-    
-    # ==========================================
-    # Proposed Model: GATv2
-    # ==========================================
-    print("\n[Proposed] Training & Evaluating GATv2...")
+    print("\n[Proposed] Training & Evaluating GATv2 (Hybrid GNN + Semantics)...")
     gat = GATModel(in_channels, hidden_channels, out_channels, heads=4, dropout=0.2)
-    gat = train_model(gat, train_data, val_data, epochs=epochs, device=device)
+    gat = train_gat_model(gat, train_data, val_data, epochs=epochs, device=device)
     z_gat = get_node_embeddings(gat, test_data, device)
     
     gat_auc = evaluate_link_prediction(z_gat, test_data.edge_label_index, test_data.edge_label)
     gat_mrr, gat_hit10 = compute_ranking_metrics(z_gat, test_data)
     
     results.append({
-        "Model": "GATv2 (Proposed)",
+        "Model": "GATv2 + SBERT (Proposed Hybrid)",
         "ROC-AUC": gat_auc,
         "MRR": gat_mrr,
         "Hit@10": gat_hit10
@@ -237,22 +272,21 @@ def run_evaluation_pipeline():
     # ==========================================
     # Display Results
     # ==========================================
-    print("\n" + "="*65)
-    print("📈  MODEL PERFORMANCE COMPARISON ON LINK PREDICTION  📈")
-    print("="*65)
+    print("\n" + "="*70)
+    print("📈  MODEL PERFORMANCE COMPARISON (HYBRID SYSTEM EVALUATION)  📈")
+    print("="*70)
     df_results = pd.DataFrame(results)
     
     df_results["ROC-AUC"] = df_results["ROC-AUC"].apply(lambda x: f"{x:.4f}")
     df_results["MRR"] = df_results["MRR"].apply(lambda x: f"{x:.4f}")
     df_results["Hit@10"] = df_results["Hit@10"].apply(lambda x: f"{x:.4f}")
     
-    # Format and print
     try:
         from tabulate import tabulate
         print(tabulate(df_results, headers='keys', tablefmt='outline', showindex=False))
     except ImportError:
         print(df_results.to_markdown(index=False))
-    print("="*65)
+    print("="*70)
 
 if __name__ == "__main__":
     run_evaluation_pipeline()
