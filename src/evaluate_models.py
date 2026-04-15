@@ -293,48 +293,35 @@ def run_evaluation_pipeline():
     print("\n" + "="*70)
     print("📈  MODEL PERFORMANCE COMPARISON (HYBRID SYSTEM EVALUATION)  📈")
     print("="*70)
+
     # -------------------------
-    # Plot Loss Comparison
+    # Plot Performance Metrics Comparison
     # -------------------------
-    losses = {}
-    try:
-        losses["Node2Vec"] = node2vec_losses
-    except NameError:
-        losses["Node2Vec"] = []
-    try:
-        losses["GATv2"] = gat_losses
-    except NameError:
-        losses["GATv2"] = []
-
-    plt.figure(figsize=(8, 6))
-    for name, vals in losses.items():
-        if not vals:
-            continue
-        epochs_x = list(range(1, len(vals) + 1))
-        plt.plot(epochs_x, vals, linestyle='--', alpha=0.4, label=f"{name} raw")
-        if len(vals) >= 3:
-            w = min(5, len(vals))
-            sm = moving_average(vals, window=w)
-            plt.plot(list(range(w, len(vals) + 1)), sm, linewidth=2, label=f"{name} smoothed")
-        else:
-            plt.plot(epochs_x, vals, linewidth=2, label=f"{name}")
-
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.title("Loss vs Epoch Comparison")
-    plt.legend()
-    plt.grid(True)
-    out_path = os.path.join(DATA_DIR, "loss_comparison.png")
-    plt.tight_layout()
-    plt.savefig(out_path)
-    print(f"Saved loss comparison plot: {out_path}")
-
-    # Print final loss values
-    print("Final losses:")
-    for name, vals in losses.items():
-        if vals:
-            print(f" - {name}: {vals[-1]:.6f}")
     df_results = pd.DataFrame(results)
+    
+    labels = df_results["Model"].tolist()
+    roc_aucs = df_results["ROC-AUC"].tolist()
+    mrrs = df_results["MRR"].tolist()
+    hits = df_results["Hit@10"].tolist()
+
+    x = np.arange(len(labels))
+    width = 0.25
+
+    plt.figure(figsize=(10, 6))
+    plt.bar(x - width, roc_aucs, width, label='ROC-AUC', color='skyblue')
+    plt.bar(x, mrrs, width, label='MRR', color='lightgreen')
+    plt.bar(x + width, hits, width, label='Hit@10', color='salmon')
+
+    plt.ylabel('Scores')
+    plt.title('Performance Metrics Comparison')
+    plt.xticks(x, labels, rotation=15, ha='right')
+    plt.legend()
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    metrics_path = os.path.join(DATA_DIR, "metrics_comparison.png")
+    plt.tight_layout()
+    plt.savefig(metrics_path)
+    print(f"Saved metrics comparison plot: {metrics_path}")
     
     df_results["ROC-AUC"] = df_results["ROC-AUC"].apply(lambda x: f"{x:.4f}")
     df_results["MRR"] = df_results["MRR"].apply(lambda x: f"{x:.4f}")
